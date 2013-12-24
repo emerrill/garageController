@@ -32,15 +32,19 @@ String buffer = String();
 int lastClick0 = 0;
 int lastClick1 = 0;
 int lastClick2 = 0;
+int lastClick3 = 0;
+int lastClick4 = 0;
+int lastClick5 = 0;
 
 //Settings
 int minPos = 0;
 int maxPos = 1500;
 
-int crackPos = 110;
+int crackPos = 80;
+int crackPosWide = 400;
 
 int overshootUp = 50;
-int overshootDown = 50;
+int overshootDown = 30;
 
 
 #define DEFAULT_OPEN_HR 8
@@ -66,6 +70,7 @@ int lastDir = 0;
 #define DEST_CLOSE 1
 #define DEST_OPEN 2
 #define DEST_CRACK 3
+#define DEST_CRACK_WIDE 4
 
 int doorDestination = DEST_NONE;
 
@@ -73,9 +78,12 @@ int doorDestination = DEST_NONE;
 #define LOC_CLOSED 1
 #define LOC_OPEN 2
 #define LOC_CRACKED 3
-#define LOC_MOVING 4
+#define LOC_CRACKED_WIDE 4
+#define LOC_MOVING 5
 
 int doorLocation = LOC_UNK;
+//int doorLocation = LOC_CLOSED;
+
 
 #define DIR_UNK 0
 #define DIR_UP 1
@@ -90,7 +98,7 @@ Adafruit_MCP23017 mcp;
 //WiFly
 WiFly wifly;
 
-tmElements_t tm;
+
 
 void setup()
 {
@@ -98,7 +106,7 @@ void setup()
   Serial.begin(9600);
   wifly.begin(&Serial, NULL);
   if (!wifly.isAssociated()) {
-	/* Setup the WiFly to connect to a wifi network */
+	// Setup the WiFly to connect to a wifi network 
 	//Serial.println("Joining network");
 	wifly.setSSID(WIFI_SSID);
 	wifly.setPassphrase(WIFI_PASSPHRASE);
@@ -118,11 +126,14 @@ void setup()
 	wifly.close();
     }
   
-  //Serial.begin(115200); Serial.println("Garage Mk2 V2-----------------------------");
+  //Serial.begin(115200);
+  //Serial.println("Garage Mk2 V2-----------------------------");
 //AdaEncoder encoderA = AdaEncoder('a', ENCA_a, ENCA_b);
   //Time 
   setSyncInterval(120);
   setSyncProvider(RTC.get);
+  
+  //Serial.println(hour());
 
   //Expander Board
   mcp.begin(0);
@@ -132,8 +143,10 @@ void setup()
   //Serial.print(hour());
   //Serial.print(':');
   //Serial.println(minute());
+  //Serial.println("Update");
   
-  closeDoor();
+  
+  forceCloseDoor();
   
   sendUpdate();
 }
@@ -159,7 +172,7 @@ void loop()
         break;
     }
   }*/
-  if ((second() == 15) && ((minute() % 5) == 0)) {
+  if ((second() == 15) && ((minute() % 56) == 0)) {
     sendUpdate(); 
   }
   
@@ -202,11 +215,22 @@ void openDoor() {
   moveDoor();
 }
 
+void forceCloseDoor() {
+  if (doorLocation == LOC_CLOSED) {
+    return;
+  }
+  //Serial.println("Closing Door");
+  doorDestination = DEST_CLOSE;
+  moveDoor();
+}
+
 void closeDoor() {
   if (doorLocation == LOC_CLOSED) {
     return;
   }
   //Serial.println("Closing Door");
+  doorDestination = DEST_CRACK_WIDE;
+  moveDoor();
   doorDestination = DEST_CLOSE;
   moveDoor();
 }
@@ -217,14 +241,18 @@ void crackDoor() {
   }
   closeDoor();
   //Serial.println("Cracking Door");
+  doorDestination = DEST_CRACK_WIDE;
+  moveDoor();
   doorDestination = DEST_CRACK;
   moveDoor();
 }
 
 void moveDoor() {
   updateEncoder();
+  //Serial.println(doorDirection);
   if (doorDirection == DIR_UNK) {
     //Not moving. Start moving.
+    Serial.println("Starting");
     pressDoorButton();
     delay(100);
   }
@@ -236,11 +264,18 @@ void moveDoor() {
       case DEST_CLOSE:
         if (doorDirection == DIR_UP) {
           //Switch Dir to down
-          //Serial.println("Revsering Door");
+          //Serial.println("Revsering Door from up to down");
+          delay(1000);
+          pressDoorButton();
+          delay(3000);
+          updateEncoder();
+          lastClick5 = 0; lastClick4 = 0; lastClick3 = 0; lastClick2 = 0; lastClick1 = 0; lastClick0 = 0;
+          updateEncoder();
           pressDoorButton();
           delay(500);
           updateEncoder();
-          pressDoorButton();
+          lastClick5 = 0; lastClick4 = 0; lastClick3 = 0; lastClick2 = 0; lastClick1 = 0; lastClick0 = 0;
+          delay(500);
         } else if (doorDirection == DIR_DOWN) {
           //Still moving down. Do nothing.
           //Serial.println("Still moving");
@@ -269,6 +304,8 @@ void moveDoor() {
           //Serial.println("Reversing Door");
           pressDoorButton();
           delay(500);
+          updateEncoder();
+          lastClick5, lastClick4, lastClick3, lastClick2, lastClick1, lastClick0 = 0;
           pressDoorButton();
         } else if (doorDirection == DIR_UNK) {
           //Stopped
@@ -287,15 +324,31 @@ void moveDoor() {
         break;
       case DEST_CRACK:
         //if (doorDirection == DIR_UP) {
-          if (pos >= (crackPos - overshootUp)) {
-            pressDoorButton();
-            delay(250);
-            //Serial.println("Door is cracked headed up.");
-            updateEncoder();
-            updateEncoder();
-            doorLocation = LOC_CRACKED;
-            return;
-          }
+        if (pos <= (crackPos + overshootDown)) {
+          pressDoorButton();
+          delay(2000);
+          //Serial.println("Door is cracked headed up.");
+          updateEncoder();
+          lastClick5 = 0; lastClick4 = 0; lastClick3 = 0; lastClick2 = 0; lastClick1 = 0; lastClick0 = 0;
+          updateEncoder();
+          doorLocation = LOC_CRACKED;
+          return;
+        }
+        break;
+      case DEST_CRACK_WIDE:
+        if (pos >= (crackPosWide - overshootUp)) {
+          pressDoorButton();
+          delay(2000);
+          //Serial.println("Door is cracked headed up.");
+          updateEncoder();
+          lastClick5 = 0; lastClick4 = 0; lastClick3 = 0; lastClick2 = 0; lastClick1 = 0; lastClick0 = 0;
+          updateEncoder();
+          doorLocation = LOC_CRACKED_WIDE;
+          return;
+        }
+        break;
+      
+          
           //Check Crack
           
         //} else if (doorDirection == DIR_DOWN) {
@@ -339,45 +392,40 @@ void updateEncoder() {
     }
   }
   
+  lastClick5 = lastClick4;
+  lastClick4 = lastClick3;
+  lastClick3 = lastClick2;
   lastClick2 = lastClick1;
   lastClick1 = lastClick0;
   lastClick0 = clicks;
   
-  int sumClicks = lastClick0 + lastClick1 + lastClick2;
-
-  if (sumClicks > 0) {
+  int sumClicks = lastClick0 + lastClick1 + lastClick2 + lastClick3 + lastClick4 + lastClick5;
+  //Serial.print(sumClicks);Serial.print(":");Serial.println(clicks);
+  if (sumClicks > 4) {
     doorDirection = DIR_UP;
-  } else if (clicks < 0) {
+  } else if (sumClicks < -4) {
     doorDirection = DIR_DOWN;
   } else {
     doorDirection = DIR_UNK;
   }
 }
 
-void sendUpdate() {
-  String data = "&";
-  
-  data = data + "hour=" + hour();
-  data = data + "&min=" + minute();
-  data = data + "&sec=" + second();
-  data = data + "&pos=" + pos;
-  data = data + "&ch=" + closeHr;
-  data = data + "&cm=" + closeMin;
-  data = data + "&oh=" + openHr;
-  data = data + "&om=" + openMin;
-  
-  makeConnection(data);
+void sendUpdate() {  
+  makeConnection();
 }
 
-void makeConnection(String extras) {
-  buffer = String();
+void makeConnection() {
   if (wifly.open(REMOTE_SERVER, REMOTE_PORT)) {
     //Serial.print("Connected to ");
     //Serial.println(site);
 
     // Send the request
-    wifly << F("GET ") << REMOTE_URI << F("?key=") << REMOTE_PASSWORD << extras << F(" HTTP/1.1\r\n");
-    wifly << F("HOST: ") << REMOTE_SERVER << endl << endl;
+    wifly << F("GET ") << REMOTE_URI << F("?key=") << REMOTE_PASSWORD;
+    wifly << F("&hour=") << hour() << F("&min=") << minute() << F("&sec=") << second() << F("&pos=") << pos;
+    wifly << F("&ch=") << closeHr << F("&cm=") << closeMin << F("&oh=") << openHr << F("&om=") << openMin; 
+    
+    
+    wifly << F(" HTTP/1.1\r\n") << F("HOST: ") << REMOTE_SERVER << endl << endl;
   } else {
     //Serial.println("Failed to connect");
   }
@@ -387,19 +435,87 @@ void makeConnection(String extras) {
 
 void loadResponse() {
   unsigned long TimeOut = millis() + 40000;
-  char a, b, c = 0;
+  char c1 = 0;
+  char c2 = 0;
+  char c3 = 0;
+  char c4 = 0;
+  char c5 = 0;
+  char c6 = 0;
+  char c7 = 0;
+  char testc2 = 0;
+  char testc3 = 0;
   boolean load = false;
+  
+  tmElements_t tm;
+  tm.Year = 0;
   
   if (!wifly.isConnected()) {
     wifly.close();
-    sendStatus("Not connected");
+    //sendStatus("Not connected");
     return; 
   }
   
+  int val = 0;
+  
   while (  TimeOut > millis() && wifly.isConnected() ) {
     if (  wifly.available() > 0 ) {
+      c7 = c6;
+      c6 = c5;
+      c5 = c4;
+      c4 = c3;
+      c3 = c2;
+      c2 = c1;
+      c1 = (char)wifly.read();
+      
+      
+      
+      if (c1 == '?' && c2 == '^') {
+        load = true;
+      }
+      
+      if (load && c1 == '&') {
+        val = ((c3 - '0') * 10) + (c2 - '0');
+        testc2 = c2; testc3 = c3;
+        
+        switch (c5) {
+          case 'y':
+            tm.Year = CalendarYrToTm(val + 2000);
+            break;
+          case 'M':
+            tm.Month = val;
+            break;
+          case 'd':
+            tm.Day = val;
+            break;
+          case 'h':
+            tm.Hour = val;
+            break;
+          case 'm':
+            tm.Minute = val;
+            break;
+          case 's':
+            tm.Second = val;
+            break;
+          case 'o':
+            openMin = val;
+            break;
+          case 'O':
+            openHr = val;
+            break;
+          case 'c':
+            closeMin = val;
+            break;
+          case 'C':
+            closeHr = val;
+            break;
+          case 'k':
+            crackPos = val;
+            break;
+        }
+      }
+      
       //buffer = buffer + (char)wifly.read();
-      if (load) {
+      /*if (load) {
         buffer += (char)wifly.read();
       } else {
         //c = b;
@@ -409,16 +525,23 @@ void loadResponse() {
           load = true;
           buffer += "^?";
         }
-      }
+      }*/
     }
   }
+  
   //Serial.println(buffer);
   wifly.close();
+  //sendStatus(tm.Year);
+  if (tm.Year > 0) {
+    //sendStatus(tm.Hour);
+    RTC.write(tm);
+  }
   
-  processResponse();
+  
+  //processResponse();
 }
 
-void processResponse() {
+/*void processResponse() {
   //String block = buffer.substring(buffer.indexOf("^"), buffer.lastIndexOf("$"));
   
   
@@ -506,16 +629,16 @@ void processResponse() {
     sendStatus(String(tm.Hour));
     RTC.write(tm);
   }
-}
+}*/
 
 
-void sendStatus(String extras) {
+void sendStatus(int i) {
   if (wifly.open(REMOTE_SERVER, REMOTE_PORT)) {
     //Serial.print("Connected to ");
     //Serial.println(site);
 
     // Send the request
-    wifly << F("GET /stat?") << extras << F(" HTTP/1.1\r\n");
+    wifly << F("GET /stat?") << String(i) << F(" HTTP/1.1\r\n");
     wifly << F("HOST: ") << REMOTE_SERVER << endl << endl;
   } else {
     //Serial.println("Failed to connect");
