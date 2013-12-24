@@ -29,23 +29,31 @@ ByteBuffer printBuffer(200);
 
 AdaEncoder encoderA = AdaEncoder('a', ENCA_a, ENCA_b);
 
+int lastClick0 = 0;
+int lastClick1 = 0;
+int lastClick2 = 0;
 
 //Settings
 int minPos = 0;
 int maxPos = 1500;
 
-int crackPos = 200;
+int crackPos = 110;
 
-int overshootUp = 45;
-int overshootDown = 45;
+int overshootUp = 50;
+int overshootDown = 50;
+
 
 #define DEFAULT_OPEN_HR 8
-#define DEFAULT_CLOSE_HR 19
+#define DEFAULT_OPEN_MIN 0
+#define DEFAULT_CLOSE_HR 18
+#define DEFAULT_CLOSE_MIN 0
 
 
 
 byte openHr = DEFAULT_OPEN_HR;
+byte openMin = DEFAULT_OPEN_MIN;
 byte closeHr = DEFAULT_CLOSE_HR;
+byte closeMin = DEFAULT_CLOSE_MIN;
 
 int pos = 0;
 int lastDir = 0;
@@ -71,7 +79,7 @@ int doorLocation = LOC_UNK;
 #define DIR_UP 1
 #define DIR_DOWN 2
 
-int lastDoorTravelDir = DIR_UNK;
+int doorDirection = DIR_UNK;
 
 
 Adafruit_MCP23017 mcp;
@@ -83,6 +91,7 @@ WiFly wifly;
 
 void setup()
 {
+  delay(1000);
   //Serial.begin(9600);
   //wifly.begin(&Serial, NULL)
 //  if (!wifly.isAssociated()) {
@@ -106,7 +115,7 @@ void setup()
 //	wifly.close();
 //    }
   
-  Serial.begin(115200); Serial.println("---------------------------------------");
+  Serial.begin(115200); Serial.println("Garage Mk2 V2-----------------------------");
 //AdaEncoder encoderA = AdaEncoder('a', ENCA_a, ENCA_b);
   //Time 
   setSyncProvider(RTC.get);
@@ -116,8 +125,11 @@ void setup()
   
   mcp.pinMode(DOOR_CONTROL, OUTPUT);
   mcp.digitalWrite(DOOR_CONTROL, LOW);
+  Serial.print(hour());
+  Serial.print(':');
+  Serial.println(minute());
   
-  Serial.println(hour());
+  closeDoor();
 }
 
 void loop() 
@@ -135,134 +147,180 @@ void loop()
       case 'k':
         crackDoor();
         break;
+      case 'f':
+        Serial.println("Force Cracked");
+        doorLocation = LOC_CRACKED;
+        break;
     }
   }
-  
-  
-  
   
   
   // Just do this 'occasionally'
-  if ((millis() % 50) == 0) {
-    //updateEncoder();
-    
-    if (minute() == 0 && second() == 0) {
-      if (hour() == openHr) {
-        crackDoor();
-        delay(1000);
-      } else if (hour() == closeHr) {
-        closeDoor();
-        delay(1000);
-      }
+  //if ((millis() % 50) == 0) {
+  updateEncoder(); //Has 50ms delay in it
+  
+  if (second() == 0) {
+    if (hour() == openHr && minute() == openMin) {
+      crackDoor();
+      delay(1000);
+    } else if (hour() == closeHr && minute() == closeMin) {
+      closeDoor();
+      delay(1000);
     }
   }
   
+  //If we are moving, someone else moved it.
+  if (doorDirection != DIR_UNK) {
+    Serial.println("Door Moved");
+    //doorLocation = LOC_UNK;
+  }
+  //}
+  
   if ((millis() % 1000) == 0) {
-    updateEncoder();
+    //updateEncoder();
     Serial.println(pos);
-    delay(1);
+    
+    //doorLocation = LOC_UNK;
+
   }
 }
 
 void openDoor() {
-  Serial.println("Opening Door");
   if (doorLocation == LOC_OPEN) {
     return;
   }
-  
-  pressDoorButton();
-  
-  delay(250);
-  
-  unsigned long startTime = millis();
-  while ((millis() - startTime) < 60000) {
-    updateEncoder();
-    if (doorLocation == LOC_OPEN) {
-      Serial.println("Door Opened");
-      return;
-    } else if (doorLocation == LOC_CLOSED) {
-      Serial.println("Door hit low, reversing");
-      pressDoorButton();
-      delay(1000);
-    }
-  }
-  
-  //Fail Closed
-  Serial.println("Timeout");
-  closeDoor();
+  Serial.println("Opening Door");
+  doorDestination = DEST_OPEN;
+  moveDoor();
 }
 
 void closeDoor() {
-  Serial.println("Closing Door");
   if (doorLocation == LOC_CLOSED) {
     return;
   }
-  
-  pressDoorButton();
-  
-  delay(250);
-  
-  unsigned long startTime = millis();
-  while ((millis() - startTime) < 60000) {
-    updateEncoder();
-    if (doorLocation == LOC_CLOSED) {
-      Serial.println("Door Closed");
-      return;
-    } else if (doorLocation == LOC_OPEN) {
-      Serial.println("Door hit high, reversing");
-      pressDoorButton();
-      delay(1000);
-    }
-  }
-  
-  //Fail Closed
-  Serial.println("Timeout");
-  closeDoor();
+  Serial.println("Closing Door");
+  doorDestination = DEST_CLOSE;
+  moveDoor();
 }
 
 void crackDoor() {
   if (doorLocation == LOC_CRACKED) {
     return;
   }
+  closeDoor();
+  Serial.println("Cracking Door");
+  doorDestination = DEST_CRACK;
+  moveDoor();
+}
+
+void moveDoor() {
+  updateEncoder();
+  if (doorDirection == DIR_UNK) {
+    //Not moving. Start moving.
+    pressDoorButton();
+    delay(100);
+  }
   
-  pressDoorButton();
-  
-  delay(250);
-  
-  unsigned long startTime = millis();
-  while ((millis() - startTime) < 60000) {
+  while (1) {
     updateEncoder();
     
-    if (lastDir == DIR_DOWN) {
-      if (pos <= (crackPos + overshootDown)) {
-        pressDoorButton();
-        doorLocation = LOC_CRACKED;
-        return;
-      }
-    } else {
-      if (pos >= (crackPos - overshootUp)) {
-        pressDoorButton();
-        doorLocation = LOC_CRACKED;
-        return;
-      }
+    switch (doorDestination) {
+      case DEST_CLOSE:
+        if (doorDirection == DIR_UP) {
+          //Switch Dir to down
+          Serial.println("Revsering Door");
+          pressDoorButton();
+          delay(500);
+          updateEncoder();
+          pressDoorButton();
+        } else if (doorDirection == DIR_DOWN) {
+          //Still moving down. Do nothing.
+          //Serial.println("Still moving");
+          delay(500);
+        } else if (doorDirection == DIR_UNK) {
+          //Stopped
+          //pos = 0;
+          
+          //We are probablly closed? Need to check for bound.
+          delay(1000);
+          updateEncoder();
+          if (doorDirection == DIR_UNK) {
+            //Yup, we seem to have stopped.
+            Serial.println("Door is closed");
+            doorLocation = LOC_CLOSED;
+            pos = 0; //Recalibrate
+            return;
+          }
+        }
+        break;
+      case DEST_OPEN:
+        if (doorDirection == DIR_UP) {
+          //Still moving down. Do nothing.
+        } else if (doorDirection == DIR_DOWN) {
+          //Switch Dir to down
+          Serial.println("Reversing Door");
+          pressDoorButton();
+          delay(500);
+          pressDoorButton();
+        } else if (doorDirection == DIR_UNK) {
+          //Stopped
+          //pos = 0;
+          
+          //We are probablly closed? Need to check for bound.
+          delay(1000);
+          updateEncoder();
+          if (doorDirection == DIR_UNK) {
+            //Yup, we seem to have stopped.
+            Serial.println("Door is open");
+            doorLocation = LOC_OPEN;
+            return;
+          }
+        }
+        break;
+      case DEST_CRACK:
+        //if (doorDirection == DIR_UP) {
+          if (pos >= (crackPos - overshootUp)) {
+            pressDoorButton();
+            delay(250);
+            Serial.println("Door is cracked headed up.");
+            updateEncoder();
+            updateEncoder();
+            doorLocation = LOC_CRACKED;
+            return;
+          }
+          //Check Crack
+          
+        //} else if (doorDirection == DIR_DOWN) {
+        /*  if (pos <= (crackPos + overshootDown)) {
+            pressDoorButton();
+            Serial.println("Door is cracked headed down.");
+            doorLocation = LOC_CRACKED;
+            return;
+          }
+        }*/
+        
+        break;
     }
   }
   
 }
 
 void pressDoorButton() {
+  Serial.println("Button Press");
   doorLocation = LOC_MOVING;
   mcp.digitalWrite(DOOR_CONTROL, HIGH);
-  delay(200);
+  delay(250);
   mcp.digitalWrite(DOOR_CONTROL, LOW);
   
 }
 
 void updateEncoder() {
+  delay(50);
+  int clicks = 0;
   AdaEncoder *thisEncoder;
   thisEncoder=AdaEncoder::genie();
   if (thisEncoder != NULL) {
-    int clicks = thisEncoder->clicks;
+    clicks = thisEncoder->clicks;
     thisEncoder->clicks = 0;
     pos += clicks;
     if (pos < 0) {
@@ -271,20 +329,27 @@ void updateEncoder() {
     if (pos > maxPos) {
       maxPos = pos;
     }
-    
-    if (clicks > 0) {
-      lastDir = DIR_UP;
-    } else if (clicks < 0) {
-      lastDir = DIR_DOWN;
-    } else {
-      lastDir = DIR_UNK;
-    }
   }
   
-  if (pos < 5) {
-      doorLocation = LOC_CLOSED;
-    } else if (pos > (maxPos-50)) {
-      doorLocation = LOC_OPEN;
-    }
+  lastClick2 = lastClick1;
+  lastClick1 = lastClick0;
+  lastClick0 = clicks;
+  
+  int sumClicks = lastClick0 + lastClick1 + lastClick2;
+
+  if (sumClicks > 0) {
+    doorDirection = DIR_UP;
+  } else if (clicks < 0) {
+    doorDirection = DIR_DOWN;
+  } else {
+    doorDirection = DIR_UNK;
+  }
 }
+  
+//  if (pos < 5) {
+//    doorLocation = LOC_CLOSED;
+//  } else if (pos > (maxPos-50)) {
+//    doorLocation = LOC_OPEN;
+//  }
+
 
