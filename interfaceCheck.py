@@ -2,14 +2,16 @@
 
 import shelve, time, sys, subprocess, os
 
+
 RESTART_TIMEOUT = 21600 # 6 Hours.
+RUN_FREQ = 600
 HOSTNAME = "garage.merrilldigital.com"
 
 # Check if we are not in repair mode and just return 255 for reboot.
 if len(sys.argv) > 1:
     # TODO, actually try interface repair?
     line = sys.argv[1]
-    if line is not "test":
+    if line == "repair":
         sys.exit(255)
 
 
@@ -31,14 +33,24 @@ def check_garage_running():
 
 shelf = shelve.open('/tmp/networkcheck')
 
+now = time.time()
+
+if 'lastrun' not in shelf:
+    shelf["lastrun"] = 0
+
+diff = now - shelf["lastrun"]
+if diff > RUN_FREQ:
+    close_and_exit(0)
+
+shelf['lastrun'] = now
+
 if 'firsterror' not in shelf:
     shelf["firsterror"] = 0
 
     
-response = os.system("ping -c 1 -t2 " + HOSTNAME + " > /dev/null 2>&1")
+response = os.system("ping -c 1 -W 2 " + HOSTNAME + " > /dev/null 2>&1")
 
 if response != 0:
-    now = time.time()
     # First time we have errored. Set and return good.
     if shelf["firsterror"] == 0:
         shelf["firsterror"] = now
