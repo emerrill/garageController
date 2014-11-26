@@ -16,6 +16,7 @@ if len(sys.argv) > 1:
 
 
 def close_and_exit(code):
+    global shelf
     shelf.close()
     sys.exit(code)
 
@@ -39,7 +40,7 @@ if 'lastrun' not in shelf:
     shelf["lastrun"] = 0
 
 diff = now - shelf["lastrun"]
-if diff > RUN_FREQ:
+if diff < RUN_FREQ:
     close_and_exit(0)
 
 shelf['lastrun'] = now
